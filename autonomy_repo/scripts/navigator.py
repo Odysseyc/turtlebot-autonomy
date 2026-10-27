@@ -146,7 +146,7 @@ class Navigator(BaseNavigator):
         self.t_prev = 0.0
 
         # planning / smoothing parameters (same defaults as compute_smooth_plan in HW1)
-        self.v_desired = 0.15
+        self.v_desired = 0.55
         self.spline_alpha = 0.05
 
     def compute_heading_control(self, state: TurtleBotState, goal: TurtleBotState) -> TurtleBotControl:
