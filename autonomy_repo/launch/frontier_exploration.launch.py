@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    use_sim_time = LaunchConfiguration("use_sim_time")
+
+    return LaunchDescription([
+        DeclareLaunchArgument("use_sim_time", default_value="true"),
+
+        # RViz, same as navigator.launch.py (make sure default.rviz shows the /map topic)
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution([FindPackageShare("asl_tb3_sim"), "launch", "rviz.launch.py"])
+            ),
+            launch_arguments={
+                "config": PathJoinSubstitution([FindPackageShare("autonomy_repo"), "rviz", "default.rviz"]),
+                "use_sim_time": use_sim_time,
+            }.items(),
+        ),
+
+        # relay RViz goal clicks to /cmd_nav (handy for manual testing)
+        Node(
+            executable="rviz_goal_relay.py",
+            package="asl_tb3_lib",
+            parameters=[{"output_channel": "/cmd_nav"}],
+        ),
+
+        # publishes /state
+        Node(
+            executable="state_publisher.py",
+            package="asl_tb3_lib",
+        ),
+
+        # your HW2 navigator
+        Node(
+            executable="navigator.py",
+            package="autonomy_repo",
+            parameters=[{"use_sim_time": use_sim_time}],
+        ),
+
+        # start exploring once the map, state and navigator are up
+        TimerAction(
+            period=5.0,
+            actions=[
+                Node(
+                    executable="frontier_explorer.py",
+                    package="autonomy_repo",
+                    parameters=[{"use_sim_time": use_sim_time}],
+                )
+            ],
+        ),
+    ])
