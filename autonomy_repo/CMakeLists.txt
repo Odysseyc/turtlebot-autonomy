@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 
 
 install(PROGRAMS
+    scripts/frontier_explorer.py
     scripts/heading_controller.py
     scripts/navigator.py
     scripts/p3_plot.py
