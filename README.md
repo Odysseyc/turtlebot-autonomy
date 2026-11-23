@@ -8,17 +8,9 @@ Everything was tested in the Gazebo simulator first, then run unchanged on a phy
 
 ## How it fits together
 
-```
- camera ──> stop-sign detector ──> /detector_bool ─┐
-                                                   v
- lidar ──> mapping ──> /map ──> frontier_explorer ──> /cmd_nav (goal pose)
-                                                         │
-                                                         v
-                     /state ──> navigator: A* plan ──> spline smoothing ──> tracking controller ──> /cmd_vel ──> robot
-```
-
-The mapping, state estimation, stop-sign detector (SSD-MobileNet) and robot drivers come from the course's support packages.
-This repo contains the decision-making, planning and control on top of them.
+<p align="center">
+  <img src="images/architecture.png" alt="System diagram: camera and lidar feed the stop-sign detector and mapping, which feed the frontier explorer; it sends goals to the navigator (A* planner, spline smoothing, tracking control), which drives the TurtleBot3" width="900">
+</p>
 
 ## Components
 
