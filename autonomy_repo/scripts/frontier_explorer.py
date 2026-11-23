@@ -9,6 +9,7 @@ of stopping.
 
 import numpy as np
 import rclpy
+from rclpy.duration import Duration
 from rclpy.node import Node
 from scipy.signal import convolve2d
 
@@ -75,6 +76,13 @@ class FrontierExplorer(Node):
         self.declare_parameter("blacklist_radius", 0.5)   # [m] skip frontiers near failed goals
         self.declare_parameter("stale_goal_dist", 0.3)    # [m] goal is stale if no frontier is this close
         self.declare_parameter("done_checks", 3)          # empty checks in a row before declaring done
+        self.declare_parameter("stop_duration", 5.0)      # [s] how long to stop at a stop sign
+        self.declare_parameter("ignore_duration", 5.0)    # [s] ignore detections after resuming
+
+        # stop sign handling
+        self.stopped = False
+        self.resume_timer = None
+        self.ignore_until = None   # rclpy Time; detections before this are ignored
 
         # latest data
         self.state = None        # TurtleBotState
@@ -93,6 +101,7 @@ class FrontierExplorer(Node):
         self.state_sub = self.create_subscription(TurtleBotState, "/state", self.state_callback, 10)
         self.map_sub = self.create_subscription(OccupancyGrid, "/map", self.map_callback, 10)
         self.nav_success_sub = self.create_subscription(Bool, "/nav_success", self.nav_success_callback, 10)
+        self.detector_sub = self.create_subscription(Bool, "/detector_bool", self.detector_callback, 10)
 
         self.timer = self.create_timer(self.get_parameter("decision_period").value, self.decide)
         self.get_logger().info("Frontier explorer started")
@@ -112,8 +121,50 @@ class FrontierExplorer(Node):
             probs=msg.data,
         )
 
+    def detector_callback(self, msg: Bool) -> None:
+        """Stop for stop_duration seconds when a stop sign is detected."""
+        if not msg.data or self.done or self.stopped or self.state is None:
+            return
+
+        # right after resuming, the same stop sign may still be in view: ignore it
+        now = self.get_clock().now()
+        if self.ignore_until is not None and now < self.ignore_until:
+            return
+
+        self.stopped = True
+        stop_duration = self.get_parameter("stop_duration").value
+        self.get_logger().info(f"Stop sign detected: stopping for {stop_duration:.1f} s")
+
+        # The navigator owns /cmd_vel, so stop it the navigator's way: command the
+        # current pose as the goal. It is already "near" and aligned, so the
+        # navigator parks immediately and goes IDLE (zero velocity).
+        self.cmd_nav_pub.publish(
+            TurtleBotState(x=self.state.x, y=self.state.y, theta=self.state.theta)
+        )
+
+        # one-shot timer to resume exploration
+        self.resume_timer = self.create_timer(stop_duration, self.resume_exploration)
+
+    def resume_exploration(self) -> None:
+        # make the timer one-shot
+        self.resume_timer.cancel()
+        self.destroy_timer(self.resume_timer)
+        self.resume_timer = None
+
+        self.stopped = False
+        ignore_duration = self.get_parameter("ignore_duration").value
+        self.ignore_until = self.get_clock().now() + Duration(seconds=ignore_duration)
+        self.get_logger().info(
+            f"Resuming exploration; ignoring stop signs for {ignore_duration:.1f} s"
+        )
+
+        # pick the closest frontier again (usually the same goal as before the stop)
+        self.goal = None
+        self.need_goal = True
+        self.decide()
+
     def nav_success_callback(self, msg: Bool) -> None:
-        if self.done or self.goal is None:
+        if self.done or self.stopped or self.goal is None:
             return
         if msg.data:
             self.get_logger().info(f"Reached frontier goal ({self.goal[0]:.2f}, {self.goal[1]:.2f})")
@@ -129,7 +180,7 @@ class FrontierExplorer(Node):
     # ----- decision logic --------------------------------------------------
 
     def decide(self) -> None:
-        if self.done or self.state is None or self.occupancy is None:
+        if self.done or self.stopped or self.state is None or self.occupancy is None:
             return
 
         frontiers = explore(self.occupancy, window_size=self.get_parameter("window_size").value)
